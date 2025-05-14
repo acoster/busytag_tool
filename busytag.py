@@ -1,16 +1,35 @@
-from dataclasses import dataclass
-from enum import Enum
-from typing import Sequence, Optional
+# SPDX-License-Identifier: MIT
 
 import logging
+import re
+from dataclasses import dataclass
+from enum import Enum, IntFlag, verify, NAMED_FLAGS
+from typing import Sequence, Optional
+
 import serial
 
-__all__ = ['Device', 'FileEntry', 'FileEntryType', 'WifiConfig']
+__all__ = ['Device', 'FileEntry', 'FileEntryType', 'LedConfig',
+           'LedPatternEntry', 'LedPin', 'WifiConfig']
 logger = logging.getLogger(__name__)
+rgb_re = re.compile(r'^[0-9A-F]{6}$')
+
 
 class FileEntryType(Enum):
     FILE = 'file'
     DIRECTORY = 'dir'
+
+
+@verify(NAMED_FLAGS)
+class LedPin(IntFlag):
+    LED_1 = 1
+    LED_2 = 2
+    LED_3 = 4
+    LED_4 = 8
+    LED_5 = 16
+    LED_6 = 32
+    LED_7 = 64
+    ALL = 127
+
 
 @dataclass
 class FileEntry:
@@ -25,6 +44,31 @@ class WifiConfig:
     """Wifi configuration."""
     ssid: str
     password: str
+
+
+@dataclass
+class LedConfig:
+    pins: LedPin
+    color: str
+
+    def __post_init__(self):
+        assert rgb_re.match(self.color)
+
+
+@dataclass
+class LedPatternEntry:
+    pins: LedPin
+    color: str
+    speed: int
+    delay: int
+
+    def __post_init__(self):
+        assert rgb_re.match(self.color)
+        assert self.speed >= 0
+        assert self.delay >= 0
+
+    def __str__(self):
+        return f'{int(self.pins)},{self.color},{self.speed},{self.delay}'
 
 
 def build_exception(error_response: bytes) -> Exception:
@@ -56,6 +100,7 @@ def build_exception(error_response: bytes) -> Exception:
             return Exception(
                 'Unexpected error response %s' % (error_response.decode(),))
 
+
 class Device(object):
     """Class to interact with Busy-Tag devices through a serial connection.
 
@@ -63,7 +108,8 @@ class Device(object):
     https://luxafor.helpscoutdocs.com/article/47-busy-tag-usb-cdc-command-reference-guide.
     """
 
-    def __init__(self, port_path: Optional[str] = None, connection : Optional[serial.Serial] = None):
+    def __init__(self, port_path: Optional[str] = None,
+                 connection: Optional[serial.Serial] = None):
         assert not (port_path is None and connection is None)
         if port_path is not None:
             self._port = port_path
@@ -73,11 +119,11 @@ class Device(object):
             self._port = None
             self.conn = connection
 
-        self.__capacity = int(self.__exec_gquery('TSS'))
-        self.__device_id = self.__exec_gquery('ID')
-        self.__firmware_version = self.__exec_gquery('FV')
-        self.__manufacturer = self.__exec_gquery('MN')
-        self.__name = self.__exec_gquery('DN')
+        self.__capacity = int(self.__get_readonly_attribute('TSS'))
+        self.__device_id = self.__get_readonly_attribute('ID')
+        self.__firmware_version = self.__get_readonly_attribute('FV')
+        self.__manufacturer = self.__get_readonly_attribute('MN')
+        self.__name = self.__get_readonly_attribute('DN')
 
     def list_pictures(self) -> Sequence[FileEntry]:
         """Lists pictures that can be displayed on the screen."""
@@ -106,10 +152,8 @@ class Device(object):
             l = self.__readline()
             if l.startswith(b'+evn'):
                 continue
-
             if l.startswith(b'OK'):
                 break
-
             filename, entry_type, size = l.decode().removeprefix('+FL:').split(
                 ',')
             result.append(
@@ -124,8 +168,9 @@ class Device(object):
 
         # First part of response: +GF:<filename>,<size in bytes>\r\n
         response = self.__read_response('+GF:')
-        if b','  not in response:
-            raise IOError('Malformed response to command AT+GF=%s' % (response,))
+        if b',' not in response:
+            raise IOError(
+                'Malformed response to command AT+GF=%s' % (response,))
 
         read_size = int(response.split(b',')[1]) + 8
         logger.debug(f'Reading {read_size} bytes from device')
@@ -133,7 +178,7 @@ class Device(object):
         assert response[-6:] == b'\r\nOK\r\n'
         return response[2:-6]
 
-    def upload_file(self, filename:str, data:bytes):
+    def upload_file(self, filename: str, data: bytes):
         """Writes a file to the device."""
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
         self.__readline()
@@ -150,35 +195,66 @@ class Device(object):
 
     def set_active_picture(self, filename: str):
         """Set the picture that will be shown on the display."""
-        self.__send_command('AT+SP=%s' % (filename,))
-        self.__read_response('OK')
+        self.__set_attribute('SP', filename)
 
     def get_active_picture(self) -> str:
         """Gets the file name of the picture being displayed."""
-        return self.__exec_query('SP')
+        return self.__get_attribute('SP')
 
     def get_free_storage(self) -> int:
-        return int(self.__exec_gquery('FSS'))
+        return int(self.__get_readonly_attribute('FSS'))
 
     def get_display_brightness(self) -> int:
-        return int(self.__exec_query('DB'))
+        return int(self.__get_attribute('DB'))
 
     def set_display_brightness(self, brightness: int):
         if brightness < 1 or brightness > 100:
             raise ValueError('Brightness must be between 1 and 100')
-        self.__send_command('AT+DB=%d' % (brightness,))
+        self.__set_attribute('DB', f'{brightness}')
+
+    def get_led_solid_color(self) -> LedConfig:
+        pins, rgb = self.__get_attribute('SC').split(',')
+        return LedConfig(LedPin(int(pins)), rgb)
+
+    def set_led_solid_color(self, config: LedConfig):
+        self.__set_attribute('SC', f'{int(config.pins)},{config.color}')
+
+    def get_led_pattern(self) -> Sequence[LedPatternEntry]:
+        result = []
+        self.__send_command('AT+CP?')
+        while True:
+            entry = self.__readline().strip()
+            if entry.startswith(b'ERROR'):
+                logger.error('Received error response: %s', entry)
+                raise build_exception(entry)
+            if entry.startswith(b'+CP'):
+                pins, rgb, speed, delay = entry.removeprefix(
+                    b'+CP:').decode().split(',')
+                result.append(
+                    LedPatternEntry(LedPin(int(pins)), rgb, int(speed),
+                                    int(delay)))
+            elif entry.startswith(b'OK'):
+                break
+
+        return result
+
+    def set_led_pattern(self, pattern: Sequence[LedPatternEntry]):
+        assert 0 < len(pattern) <= 40
+        self.__send_command(f'AT+CP={len(pattern)}')
+        self.__read_response('>')
+        for entry in pattern:
+            self.__send_command(f'+CP:{entry}')
         self.__read_response('OK')
 
     def get_wifi_config(self) -> WifiConfig:
-        response = self.__exec_query('WC')
+        response = self.__get_attribute('WC')
         if ',' not in response:
             raise IOError(f'Malformed response to command AT+WC: {response}')
         ssid, password = response.split(',', 1)
         return WifiConfig(ssid, password)
 
     def set_wifi_config(self, wifi_config: WifiConfig):
-        self.__send_command('AT+WC=%s,%s' % (wifi_config.ssid, wifi_config.password))
-        self.__read_response('OK')
+        self.__set_attribute('WC', f'{wifi_config.ssid},{wifi_config.password}')
 
     def reset_wifi_config(self):
         self.__send_command('AT+FRWCF')
@@ -204,17 +280,24 @@ class Device(object):
     def name(self) -> str:
         return self.__name
 
-    def __exec_gquery(self, attribute: str) -> str:
-        """Sends an `AT+G<attribute>` query, and returns the response without its prefix."""
+    def __get_readonly_attribute(self, attribute: str) -> str:
+        """Retrieves the value of a read-only attribute (e.g. device id)."""
         response_prefix = f'+{attribute}:'
         self.__send_command(f'AT+G{attribute}')
-        return self.__read_response(response_prefix).decode().removeprefix(response_prefix)
+        return self.__read_response(response_prefix).decode().removeprefix(
+            response_prefix)
 
-    def __exec_query(self, attribute: str) -> str:
-        """Sends an AT+<attribute>? query, and returns the response without its prefix."""
+    def __get_attribute(self, attribute: str) -> str:
+        """Retrieves the value of a user-modifiable attribute (e.g. active picture)."""
         response_prefix = f'+{attribute}:'
         self.__send_command(f'AT+{attribute}?')
-        return self.__read_response(response_prefix).decode().removeprefix(response_prefix)
+        return self.__read_response(response_prefix).decode().removeprefix(
+            response_prefix)
+
+    def __set_attribute(self, attribute: str, value: str):
+        """Sets the value of a user-modifiable attribute (e.g. active picture)."""
+        self.__send_command(f'AT+{attribute}={value}')
+        self.__read_response('OK')
 
     def __send_command(self, command: str):
         encoded_command = command.encode() + b'\r\n'
