@@ -1,16 +1,34 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence
+from typing import Sequence, Optional
 
+import logging
 import serial
 
+__all__ = ['Device', 'FileEntry', 'FileEntryType', 'WifiConfig']
+logger = logging.getLogger(__name__)
 
 class FileEntryType(Enum):
     FILE = 'file'
     DIRECTORY = 'dir'
 
+@dataclass
+class FileEntry:
+    """File stored in the Busy Tag device."""
+    name: str
+    size: int
+    type: FileEntryType = FileEntryType.FILE
+
+
+@dataclass
+class WifiConfig:
+    """Wifi configuration."""
+    ssid: str
+    password: str
+
 
 def build_exception(error_response: bytes) -> Exception:
+    """Converts an error response from Busy Tag to an Exception"""
     if not error_response.startswith(b'ERROR:'):
         return Exception(
             'Unexpected error response %s' % (error_response.decode(),))
@@ -38,34 +56,28 @@ def build_exception(error_response: bytes) -> Exception:
             return Exception(
                 'Unexpected error response %s' % (error_response.decode(),))
 
-
-@dataclass
-class FileEntry:
-    """File in the busytag device"""
-    name: str
-    size: int
-    type: FileEntryType = FileEntryType.FILE
-
-
 class Device(object):
-    def __init__(self, port: str):
-        self._port = port
-        self.conn = serial.Serial(port, 115200)
+    """Class to interact with Busy-Tag devices through a serial connection.
 
-        self.__send_command('AT+GDN')
-        self.__name = self.__read_response('+DN').decode().removeprefix('+DN:')
+    The protocol to communicate with the Busy-Tag device is documented at
+    https://luxafor.helpscoutdocs.com/article/47-busy-tag-usb-cdc-command-reference-guide.
+    """
 
-        self.__send_command('AT+GID')
-        self.__device_id = self.__read_response('+ID').decode().removeprefix(
-            '+ID:')
+    def __init__(self, port_path: Optional[str] = None, connection : Optional[serial.Serial] = None):
+        assert not (port_path is None and connection is None)
+        if port_path is not None:
+            self._port = port_path
+            logger.info(f'Connecting to serial port {port_path}')
+            self.conn = serial.Serial(port_path, 115200)
+        else:
+            self._port = None
+            self.conn = connection
 
-        self.__send_command('AT+GFV')
-        self.__firmware_version = self.__read_response(
-            '+FV').decode().removeprefix('+FV:')
-
-        self.__send_command('AT+GTSS')
-        self.__capacity = int(self.__read_response(
-            '+TSS').decode().removeprefix('+TSS:'))
+        self.__capacity = int(self.__exec_gquery('TSS'))
+        self.__device_id = self.__exec_gquery('ID')
+        self.__firmware_version = self.__exec_gquery('FV')
+        self.__manufacturer = self.__exec_gquery('MN')
+        self.__name = self.__exec_gquery('DN')
 
     def list_pictures(self) -> Sequence[FileEntry]:
         """Lists pictures that can be displayed on the screen."""
@@ -106,6 +118,8 @@ class Device(object):
         return result
 
     def read_file(self, filename: str) -> bytes:
+        """Reads a file stored on the device."""
+        logger.info(f'Reading file {filename}')
         self.__send_command('AT+GF=%s' % (filename,))
 
         # First part of response: +GF:<filename>,<size in bytes>\r\n
@@ -113,44 +127,41 @@ class Device(object):
         if b','  not in response:
             raise IOError('Malformed response to command AT+GF=%s' % (response,))
 
-        file_size = int(response.split(b',')[1])
-        # \r\n between response and file
-        self.__readline()
-        response = self.conn.read(file_size)
-
-        # After the file, terminate with \r\nOK\r\n
-        terminator = self.conn.read(6)
-        assert terminator == b'\r\nOK\r\n'
-        return response
+        read_size = int(response.split(b',')[1]) + 8
+        logger.debug(f'Reading {read_size} bytes from device')
+        response = self.conn.read(read_size)
+        assert response[-6:] == b'\r\nOK\r\n'
+        return response[2:-6]
 
     def upload_file(self, filename:str, data:bytes):
+        """Writes a file to the device."""
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
         self.__readline()
+        logger.debug('Writing %d bytes to device', len(data))
         self.conn.write(data)
-
         terminator = self.conn.read(6)
         assert terminator == b'\r\nOK\r\n'
 
     def delete_file(self, filename: str):
+        """Deletes a file from the device."""
         self.__send_command('AT+DF=%s' % (filename,))
         self.__read_response('+DF:')
         self.__read_response('OK')
 
     def set_active_picture(self, filename: str):
+        """Set the picture that will be shown on the display."""
         self.__send_command('AT+SP=%s' % (filename,))
         self.__read_response('OK')
 
     def get_active_picture(self) -> str:
-        self.__send_command('AT+SP?')
-        return self.__read_response('+SP').decode().removeprefix('+SP:')
+        """Gets the file name of the picture being displayed."""
+        return self.__exec_query('SP')
 
     def get_free_storage(self) -> int:
-        self.__send_command('AT+GFSS')
-        return int(self.__read_response('+FSS').decode().removeprefix('+FSS:'))
+        return int(self.__exec_gquery('FSS'))
 
     def get_display_brightness(self) -> int:
-        self.__send_command('AT+DB?')
-        return int(self.__read_response('+DB').decode().removeprefix('+DB:'))
+        return int(self.__exec_query('DB'))
 
     def set_display_brightness(self, brightness: int):
         if brightness < 1 or brightness > 100:
@@ -158,9 +169,24 @@ class Device(object):
         self.__send_command('AT+DB=%d' % (brightness,))
         self.__read_response('OK')
 
+    def get_wifi_config(self) -> WifiConfig:
+        response = self.__exec_query('WC')
+        if ',' not in response:
+            raise IOError(f'Malformed response to command AT+WC: {response}')
+        ssid, password = response.split(',', 1)
+        return WifiConfig(ssid, password)
+
+    def set_wifi_config(self, wifi_config: WifiConfig):
+        self.__send_command('AT+WC=%s,%s' % (wifi_config.ssid, wifi_config.password))
+        self.__read_response('OK')
+
+    def reset_wifi_config(self):
+        self.__send_command('AT+FRWCF')
+        self.__read_response('OK')
+
     @property
-    def name(self) -> str:
-        return self.__name
+    def capacity(self) -> int:
+        return self.__capacity
 
     @property
     def device_id(self) -> str:
@@ -171,13 +197,32 @@ class Device(object):
         return self.__firmware_version
 
     @property
-    def capacity(self) -> int:
-        return self.__capacity
+    def manufacturer(self) -> str:
+        return self.__manufacturer
+
+    @property
+    def name(self) -> str:
+        return self.__name
+
+    def __exec_gquery(self, attribute: str) -> str:
+        """Sends an `AT+G<attribute>` query, and returns the response without its prefix."""
+        response_prefix = f'+{attribute}:'
+        self.__send_command(f'AT+G{attribute}')
+        return self.__read_response(response_prefix).decode().removeprefix(response_prefix)
+
+    def __exec_query(self, attribute: str) -> str:
+        """Sends an AT+<attribute>? query, and returns the response without its prefix."""
+        response_prefix = f'+{attribute}:'
+        self.__send_command(f'AT+{attribute}?')
+        return self.__read_response(response_prefix).decode().removeprefix(response_prefix)
 
     def __send_command(self, command: str):
-        self.conn.write(command.encode() + b'\r\n')
+        encoded_command = command.encode() + b'\r\n'
+        logger.debug('Sending command: %s', encoded_command)
+        self.conn.write(encoded_command)
 
     def __read_response(self, prefix: str) -> bytes:
+        logger.debug(f'Waiting for prefix: {prefix}')
         encoded_prefix = prefix.encode()
         while True:
             response = self.__readline()
@@ -186,6 +231,8 @@ class Device(object):
 
     def __readline(self) -> bytes:
         result = self.conn.readline()
+        logger.debug('Read from device: %s', result)
         if result.startswith(b'ERROR'):
+            logger.error('Received error response: %s', result)
             raise build_exception(result)
         return result.strip()
