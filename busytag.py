@@ -21,13 +21,13 @@ class FileEntryType(Enum):
 
 @verify(NAMED_FLAGS)
 class LedPin(IntFlag):
-    LED_1 = 1
-    LED_2 = 2
-    LED_3 = 4
-    LED_4 = 8
-    LED_5 = 16
-    LED_6 = 32
-    LED_7 = 64
+    PIN_0 = 1
+    PIN_1 = 2
+    PIN_2 = 4
+    PIN_3 = 8
+    PIN_4 = 16
+    PIN_5 = 32
+    PIN_6 = 64
     ALL = 127
 
 
@@ -164,8 +164,8 @@ class Device(object):
     def read_file(self, filename: str) -> bytes:
         """Reads a file stored on the device."""
         logger.info(f'Reading file {filename}')
-        self.__send_command('AT+GF=%s' % (filename,))
 
+        self.__send_command('AT+GF=%s' % (filename,))
         # First part of response: +GF:<filename>,<size in bytes>\r\n
         response = self.__read_response('+GF:')
         if b',' not in response:
@@ -180,6 +180,8 @@ class Device(object):
 
     def upload_file(self, filename: str, data: bytes):
         """Writes a file to the device."""
+        logger.info(f'Uploading file {filename} ({len(data)} bytes)')
+
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
         self.__readline()
         logger.debug('Writing %d bytes to device', len(data))
@@ -189,12 +191,14 @@ class Device(object):
 
     def delete_file(self, filename: str):
         """Deletes a file from the device."""
+        logger.info(f'Deleting file {filename}')
         self.__send_command('AT+DF=%s' % (filename,))
         self.__read_response('+DF:')
         self.__read_response('OK')
 
     def set_active_picture(self, filename: str):
         """Set the picture that will be shown on the display."""
+        logger.info(f'Setting active picture {filename}')
         self.__set_attribute('SP', filename)
 
     def get_active_picture(self) -> str:
@@ -254,9 +258,11 @@ class Device(object):
         return WifiConfig(ssid, password)
 
     def set_wifi_config(self, wifi_config: WifiConfig):
+        logger.info(f'Setting Wifi SSID to {wifi_config.ssid}')
         self.__set_attribute('WC', f'{wifi_config.ssid},{wifi_config.password}')
 
     def reset_wifi_config(self):
+        logger.info('Resetting wifi configuration')
         self.__send_command('AT+FRWCF')
         self.__read_response('OK')
 
