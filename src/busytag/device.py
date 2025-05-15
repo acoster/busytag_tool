@@ -1,104 +1,14 @@
 # SPDX-License-Identifier: MIT
 
 import logging
-import re
-from dataclasses import dataclass
-from enum import Enum, IntFlag, verify, NAMED_FLAGS
 from typing import Sequence, Optional
+
+from .types import *
 
 import serial
 
-__all__ = ['Device', 'FileEntry', 'FileEntryType', 'LedConfig',
-           'LedPatternEntry', 'LedPin', 'WifiConfig']
+__all__ = ['Device']
 logger = logging.getLogger(__name__)
-rgb_re = re.compile(r'^[0-9A-F]{6}$')
-
-
-class FileEntryType(Enum):
-    FILE = 'file'
-    DIRECTORY = 'dir'
-
-
-@verify(NAMED_FLAGS)
-class LedPin(IntFlag):
-    PIN_0 = 1
-    PIN_1 = 2
-    PIN_2 = 4
-    PIN_3 = 8
-    PIN_4 = 16
-    PIN_5 = 32
-    PIN_6 = 64
-    ALL = 127
-
-
-@dataclass(frozen=True)
-class FileEntry:
-    """File stored in the Busy Tag device."""
-    name: str
-    size: int
-    type: FileEntryType = FileEntryType.FILE
-
-
-@dataclass(frozen=True)
-class WifiConfig:
-    """Wifi configuration."""
-    ssid: str
-    password: str
-
-
-@dataclass(frozen=True)
-class LedConfig:
-    pins: LedPin
-    color: str
-
-    def __post_init__(self):
-        assert rgb_re.match(self.color)
-
-
-@dataclass(frozen=True)
-class LedPatternEntry:
-    pins: LedPin
-    color: str
-    speed: int
-    delay: int
-
-    def __post_init__(self):
-        assert rgb_re.match(self.color)
-        assert self.speed >= 0
-        assert self.delay >= 0
-
-    def __str__(self) -> str:
-        return f'{int(self.pins)},{self.color},{self.speed},{self.delay}'
-
-
-def build_exception(error_response: bytes) -> Exception:
-    """Converts an error response from Busy Tag to an Exception"""
-    if not error_response.startswith(b'ERROR:'):
-        return Exception(
-            'Unexpected error response %s' % (error_response.decode(),))
-
-    parts = error_response.decode().strip().split(':')
-    if len(parts) != 2:
-        return Exception(
-            'Unexpected error response %s' % (error_response.decode(),))
-
-    match parts[1]:
-        case '-1':
-            return Exception(
-                'Unexpected error response %s' % (error_response.decode(),))
-        case '0':
-            return Exception('Unknown error')
-        case '1':
-            return ValueError('Invalid command')
-        case '2':
-            return ValueError('Invalid argument')
-        case '3':
-            return FileNotFoundError('File not found')
-        case '4':
-            return ValueError('Invalid size')
-        case _:
-            return Exception(
-                'Unexpected error response %s' % (error_response.decode(),))
 
 
 class Device(object):
@@ -122,7 +32,8 @@ class Device(object):
         self.__capacity = int(self.__get_readonly_attribute('TSS'))
         self.__device_id = self.__get_readonly_attribute('ID')
         self.__firmware_version = self.__get_readonly_attribute('FV')
-        self.__hostname = self.__get_readonly_attribute('LHA').removeprefix('http://')
+        self.__hostname = self.__get_readonly_attribute('LHA').removeprefix(
+            'http://')
         self.__manufacturer = self.__get_readonly_attribute('MN')
         self.__name = self.__get_readonly_attribute('DN')
 
@@ -163,7 +74,11 @@ class Device(object):
         return result
 
     def read_file(self, filename: str) -> bytes:
-        """Reads a file stored on the device."""
+        """Reads a file from the device.
+
+        :param filename: The filename of the file to read
+        :return: a `bytes` object with the file contents
+        """
         logger.info(f'Reading file {filename}')
 
         self.__send_command('AT+GF=%s' % (filename,))
@@ -180,7 +95,11 @@ class Device(object):
         return response[2:-6]
 
     def upload_file(self, filename: str, data: bytes):
-        """Writes a file to the device."""
+        """Uploads a file to the device.
+
+        :param filename: The filename of the file to upload
+        :param data: The contents of the file to upload
+        """
         logger.info(f'Uploading file {filename} ({len(data)} bytes)')
 
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
@@ -191,7 +110,10 @@ class Device(object):
         assert terminator == b'\r\nOK\r\n'
 
     def delete_file(self, filename: str):
-        """Deletes a file from the device."""
+        """Deletes a file from the device.'
+
+        :param filename: The filename of the file to delete
+        """
         logger.info(f'Deleting file {filename}')
         self.__send_command('AT+DF=%s' % (filename,))
         self.__read_response('+DF:')
@@ -231,7 +153,7 @@ class Device(object):
             entry = self.__readline().strip()
             if entry.startswith(b'ERROR'):
                 logger.error('Received error response: %s', entry)
-                raise build_exception(entry)
+                raise self.build_exception(entry)
             if entry.startswith(b'+CP'):
                 pins, rgb, speed, delay = entry.removeprefix(
                     b'+CP:').decode().split(',')
@@ -328,5 +250,35 @@ class Device(object):
         logger.debug('Read from device: %s', result)
         if result.startswith(b'ERROR'):
             logger.error('Received error response: %s', result)
-            raise build_exception(result)
+            raise self.build_exception(result)
         return result.strip()
+
+    @staticmethod
+    def build_exception(error_response: bytes) -> Exception:
+        """Converts an error response from Busy Tag to an Exception"""
+        if not error_response.startswith(b'ERROR:'):
+            return Exception(
+                'Unexpected error response %s' % (error_response.decode(),))
+
+        parts = error_response.decode().strip().split(':')
+        if len(parts) != 2:
+            return Exception(
+                'Unexpected error response %s' % (error_response.decode(),))
+
+        match parts[1]:
+            case '-1':
+                return Exception(
+                    'Unexpected error response %s' % (error_response.decode(),))
+            case '0':
+                return Exception('Unknown error')
+            case '1':
+                return ValueError('Invalid command')
+            case '2':
+                return ValueError('Invalid argument')
+            case '3':
+                return FileNotFoundError('File not found')
+            case '4':
+                return ValueError('Invalid size')
+            case _:
+                return Exception(
+                    'Unexpected error response %s' % (error_response.decode(),))
