@@ -31,7 +31,7 @@ class LedPin(IntFlag):
     ALL = 127
 
 
-@dataclass
+@dataclass(frozen=True)
 class FileEntry:
     """File stored in the Busy Tag device."""
     name: str
@@ -39,14 +39,14 @@ class FileEntry:
     type: FileEntryType = FileEntryType.FILE
 
 
-@dataclass
+@dataclass(frozen=True)
 class WifiConfig:
     """Wifi configuration."""
     ssid: str
     password: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class LedConfig:
     pins: LedPin
     color: str
@@ -55,7 +55,7 @@ class LedConfig:
         assert rgb_re.match(self.color)
 
 
-@dataclass
+@dataclass(frozen=True)
 class LedPatternEntry:
     pins: LedPin
     color: str
@@ -67,7 +67,7 @@ class LedPatternEntry:
         assert self.speed >= 0
         assert self.delay >= 0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'{int(self.pins)},{self.color},{self.speed},{self.delay}'
 
 
@@ -122,6 +122,7 @@ class Device(object):
         self.__capacity = int(self.__get_readonly_attribute('TSS'))
         self.__device_id = self.__get_readonly_attribute('ID')
         self.__firmware_version = self.__get_readonly_attribute('FV')
+        self.__hostname = self.__get_readonly_attribute('LHA').removeprefix('http://')
         self.__manufacturer = self.__get_readonly_attribute('MN')
         self.__name = self.__get_readonly_attribute('DN')
 
@@ -273,6 +274,10 @@ class Device(object):
     @property
     def device_id(self) -> str:
         return self.__device_id
+
+    @property
+    def hostname(self) -> str:
+        return self.__hostname
 
     @property
     def firmware_version(self) -> str:
