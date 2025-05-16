@@ -5,7 +5,7 @@ import os.path
 
 from .types import *
 
-from typing import Optional
+from typing import Optional, Sequence
 
 class ToolConfig(object):
     def __init__(self, path: Optional[str] = None):
@@ -16,9 +16,6 @@ class ToolConfig(object):
             if os.path.exists(self.path):
                 self.__load_from_file()
 
-
-    def add_preset(self, picture_filename: str, led_config: LedConfig):
-        pass
 
     def write_to_file(self):
         assert self.path is not None
