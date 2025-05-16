@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-import logging
+from absl import logging
 from typing import Sequence, Optional
 
 from .types import *
@@ -8,7 +8,6 @@ from .types import *
 import serial
 
 __all__ = ['Device']
-logger = logging.getLogger(__name__)
 
 
 class Device(object):
@@ -19,12 +18,13 @@ class Device(object):
     """
 
     def __init__(self, port_path: Optional[str] = None,
-                 connection: Optional[serial.Serial] = None):
+                 connection: Optional[serial.Serial] = None,
+                 baudrate: int = 115200):
         assert not (port_path is None and connection is None)
         if port_path is not None:
             self._port = port_path
-            logger.info(f'Connecting to serial port {port_path}')
-            self.conn = serial.Serial(port_path, 115200)
+            logging.info(f'Connecting to serial port {port_path}')
+            self.conn = serial.Serial(port_path, baudrate)
         else:
             self._port = None
             self.conn = connection
@@ -79,7 +79,7 @@ class Device(object):
         :param filename: The filename of the file to read
         :return: a `bytes` object with the file contents
         """
-        logger.info(f'Reading file {filename}')
+        logging.info(f'Reading file {filename}')
 
         self.__send_command('AT+GF=%s' % (filename,))
         # First part of response: +GF:<filename>,<size in bytes>\r\n
@@ -89,7 +89,7 @@ class Device(object):
                 'Malformed response to command AT+GF=%s' % (response,))
 
         read_size = int(response.split(b',')[1]) + 8
-        logger.debug(f'Reading {read_size} bytes from device')
+        logging.debug(f'Reading {read_size} bytes from device')
         response = self.conn.read(read_size)
         assert response[-6:] == b'\r\nOK\r\n'
         return response[2:-6]
@@ -100,11 +100,11 @@ class Device(object):
         :param filename: The filename of the file to upload
         :param data: The contents of the file to upload
         """
-        logger.info(f'Uploading file {filename} ({len(data)} bytes)')
+        logging.info(f'Uploading file {filename} ({len(data)} bytes)')
 
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
         self.__readline()
-        logger.debug('Writing %d bytes to device', len(data))
+        logging.debug('Writing %d bytes to device', len(data))
         self.conn.write(data)
         terminator = self.conn.read(6)
         assert terminator == b'\r\nOK\r\n'
@@ -114,14 +114,14 @@ class Device(object):
 
         :param filename: The filename of the file to delete
         """
-        logger.info(f'Deleting file {filename}')
+        logging.info(f'Deleting file {filename}')
         self.__send_command('AT+DF=%s' % (filename,))
         self.__read_response('+DF:')
         self.__read_response('OK')
 
     def set_active_picture(self, filename: str):
         """Set the picture that will be shown on the display."""
-        logger.info(f'Setting active picture {filename}')
+        logging.info(f'Setting active picture {filename}')
         self.__set_attribute('SP', filename)
 
     def get_active_picture(self) -> str:
@@ -152,7 +152,7 @@ class Device(object):
         while True:
             entry = self.__readline().strip()
             if entry.startswith(b'ERROR'):
-                logger.error('Received error response: %s', entry)
+                logging.error('Received error response: %s', entry)
                 raise self.build_exception(entry)
             if entry.startswith(b'+CP'):
                 pins, rgb, speed, delay = entry.removeprefix(
@@ -181,11 +181,11 @@ class Device(object):
         return WifiConfig(ssid, password)
 
     def set_wifi_config(self, wifi_config: WifiConfig):
-        logger.info(f'Setting Wifi SSID to {wifi_config.ssid}')
+        logging.info(f'Setting Wifi SSID to {wifi_config.ssid}')
         self.__set_attribute('WC', f'{wifi_config.ssid},{wifi_config.password}')
 
     def reset_wifi_config(self):
-        logger.info('Resetting wifi configuration')
+        logging.info('Resetting wifi configuration')
         self.__send_command('AT+FRWCF')
         self.__read_response('OK')
 
@@ -234,11 +234,11 @@ class Device(object):
 
     def __send_command(self, command: str):
         encoded_command = command.encode() + b'\r\n'
-        logger.debug('Sending command: %s', encoded_command)
+        logging.debug('Sending command: %s', encoded_command)
         self.conn.write(encoded_command)
 
     def __read_response(self, prefix: str) -> bytes:
-        logger.debug(f'Waiting for prefix: {prefix}')
+        logging.debug(f'Waiting for prefix: {prefix}')
         encoded_prefix = prefix.encode()
         while True:
             response = self.__readline()
@@ -247,9 +247,9 @@ class Device(object):
 
     def __readline(self) -> bytes:
         result = self.conn.readline()
-        logger.debug('Read from device: %s', result)
+        logging.debug('Read from device: %s', result)
         if result.startswith(b'ERROR'):
-            logger.error('Received error response: %s', result)
+            logging.error('Received error response: %s', result)
             raise self.build_exception(result)
         return result.strip()
 
