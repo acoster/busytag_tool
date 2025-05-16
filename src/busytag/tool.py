@@ -120,5 +120,8 @@ def main(argv: List[str]) -> None:
 
     config.write_to_file()
 
-if __name__ == '__main__':
+def run_main():
     app.run(main)
+
+if __name__ == '__main__':
+    run_main()
