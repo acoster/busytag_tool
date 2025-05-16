@@ -1,0 +1,30 @@
+[project]
+name = "busytag"
+version = "0.1.0"
+dynamic = ["dependencies"]
+authors = [{ name = "Alex Coster", email = "alex@coster.ch" }]
+description = "A library and CLI tool to control Busy Tag devices."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Operating System :: OS Independent"
+]
+
+[project.scripts]
+busytag-tool = "busytag.tool:run_main"
+
+[project.urls]
+Homepage = "https://github.com/acoster/busytag_tool"
+Issues = "https://github.com/acoster/busytag_tool/issues"
+Repository = "https://github.com/acoster/busytag_tool.git"
+
+[build-system]
+requires = ["hatchling >= 1.26", "hatch-requirements-txt"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
