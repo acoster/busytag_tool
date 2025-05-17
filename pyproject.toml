@@ -1,6 +1,6 @@
 [project]
 name = "busytag"
-version = "0.1.0"
+version = "0.1.1"
 dynamic = ["dependencies"]
 authors = [{ name = "Alex Coster", email = "alex@coster.ch" }]
 description = "A library and CLI tool to control Busy Tag devices."
@@ -8,11 +8,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+classifiers = ["Development Status :: 2 - Pre-Alpha",
     "Environment :: Console",
-    "Operating System :: OS Independent"
-]
+    "Operating System :: OS Independent"]
 
 [project.scripts]
 busytag-tool = "busytag.tool:run_main"

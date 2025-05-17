@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: MIT
-
-from absl import app, flags
-
 from os.path import basename, expanduser
-from typing import List
+from typing import List, Optional
+
+import serial.tools.list_ports
+from absl import app, flags, logging
 
 from .config import ToolConfig
 from .device import Device
@@ -15,30 +15,61 @@ flags.DEFINE_string('config_file', '~/.busytag.toml', 'Config file path')
 flags.DEFINE_string('device', None, 'Busy Tag\'s serial port.')
 flags.DEFINE_integer('baudrate', 115200, 'Connection baudrate.')
 
+
 def format_size(size: int) -> str:
     if size < 1_000:
         return f'{size} B'
     if size < 500_000:
-        return f'{size/1_000:.2f} kB'
-    return f'{size/1_000_000:.2f} MB'
+        return f'{size / 1_000:.2f} kB'
+    return f'{size / 1_000_000:.2f} MB'
 
 
-def main(argv: List[str]) -> None:
+def list_devices(baudrate: int) -> List[str]:
+    devices = []
+    ports = serial.tools.list_ports.comports()
+    logging.debug(f'Probing {len(ports)} serial devices...')
+
+    for port in ports:
+        try:
+            logging.debug(f'Trying to connect to {port.device}')
+            with serial.Serial(port.device, baudrate=baudrate, timeout=1.0) as conn:
+                logging.debug(f'Connected to {port.device}')
+                conn.write(b'AT+GDN\r\n')
+                while True:
+                    response = conn.readline()
+                    logging.debug(f'Read from device: {response}')
+                    if response.startswith(b'+evn'):
+                        continue
+                    if response.startswith(b'+DN:busytag-'):
+                        devices.append(port.device)
+                    break
+        except Exception:
+            pass
+
+    return devices
+
+
+def main(argv: List[str]) -> Optional[int]:
     config = ToolConfig(FLAGS.config_file)
     if FLAGS.device is not None:
         config.device = FLAGS.device
-    if config.device is None:
-        raise Exception('Device must be specified')
+    config.write_to_file()
 
-    bt:Device = None
+    bt: Optional[Device] = None
 
     # Remove argv[0]
-    argv.pop(0)
+    exec_name = argv.pop(0)
     command = 'help'
     if len(argv) > 0:
         command = argv.pop(0)
-        bt = Device(config.device, baudrate=FLAGS.baudrate)
 
+        # Don't bother connecting for commands that don't need a device connection.
+        if command not in ('list_devices', 'help'):
+            if config.device is None:
+                print('A device must be specified using the `--device` flag or be set in the config file!')
+                print(f'You can run `{exec_name} list_devices` to find the available devices.')
+                return 1
+            bt = Device(config.device, baudrate=FLAGS.baudrate)
 
     match command:
         case 'info':
@@ -48,6 +79,15 @@ def main(argv: List[str]) -> None:
             print(f'Serial port:      {config.device}')
             print(f'Storage capacity: {format_size(bt.capacity)}')
             print(f'Free storage:     {format_size(bt.get_free_storage())}')
+
+        case 'list_devices':
+            devices = list_devices(FLAGS.baudrate)
+            if len(devices) == 0:
+                print('No devices found')
+            else:
+                print('Available devices:')
+                for device in devices:
+                    print(f'  {device}')
 
         case 'list_pictures':
             print('Pictures in device:')
@@ -91,6 +131,15 @@ def main(argv: List[str]) -> None:
             led_config = LedConfig(LedPin.ALL, argv.pop(0).upper())
             bt.set_led_solid_color(led_config)
 
+        case 'apply_led_preset':
+            assert len(argv) >= 1
+            preset_name = argv.pop(0)
+
+            # Clear all LEDs first
+            bt.set_led_solid_color(LedConfig(LedPin.ALL, '000000'))
+            for e in config.led_presets.get(preset_name):
+                bt.set_led_solid_color(e)
+
         case 'get_brightness':
             print(f'Brightness: {bt.get_display_brightness()}')
 
@@ -101,8 +150,10 @@ def main(argv: List[str]) -> None:
             bt.set_display_brightness(brightness)
 
         case 'help':
+            print(f'\n\tUSAGE: {exec_name} [flags] <command> [<args>]\n')
             print('Available commands:')
             print('  help: Prints this message')
+            print('  list_devices: Lists available devices')
             print('  info: Displays device information')
             print('  list_pictures: Lists pictures in device')
             print('  list_files: Lists files in device')
@@ -112,16 +163,20 @@ def main(argv: List[str]) -> None:
             print('  get <filename>: Copies <filename> from the device to the working directory')
             print('  rm <filename>: Deletes <filename>')
             print('  set_led_solid_color <6 hex RGB colour>: Sets the LEDs colour')
+            print('  apply_led_preset <preset name>: Sets the LEDs colour according to a preset')
             print('  get_brightness: Gets current display brightness')
             print('  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive')
+            print(f'\nFor flag documentation, run {exec_name} --help')
 
         case _:
             print(f'Unknown command `{command}`. Please use the `help` to list available commands')
+            return 1
+    return 0
 
-    config.write_to_file()
 
 def run_main():
     app.run(main)
+
 
 if __name__ == '__main__':
     run_main()
