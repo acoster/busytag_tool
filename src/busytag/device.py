@@ -1,14 +1,48 @@
 # SPDX-License-Identifier: MIT
 
 from absl import logging
-from typing import Sequence, Optional
+from typing import Sequence, Optional, List
 
 from .types import *
 
 import serial
+from serial.tools.list_ports import comports
 
-__all__ = ['Device']
+__all__ = ['Device', 'list_devices']
 
+
+def list_devices(baudrate: int) -> List[str]:
+    """Lists all Busy Tag devices connected to the computer.
+
+    This function tries to connect to all serial devices that report being a 'BUSY TAG' product, and returns a list of
+    those that responded to the AT+GDN command according to the API documentation.
+
+    :param baudrate: Baudrate to use when connecting to the devices.
+    :return: List of port names for the detected devices.
+    """
+    devices = []
+    ports = comports()
+    for port in ports:
+        if port.product != 'BUSY TAG':
+            continue
+
+        try:
+            logging.debug(f'Trying to connect to {port.device}')
+            with serial.Serial(port.device, baudrate=baudrate, timeout=1.0) as conn:
+                logging.debug(f'Connected to {port.device}')
+                conn.write(b'AT+GDN\r\n')
+                while True:
+                    response = conn.readline()
+                    logging.debug(f'Read from device: {response}')
+                    if response.startswith(b'+evn'):
+                        continue
+                    if response.startswith(b'+DN:busytag-'):
+                        devices.append(port.device)
+                    break
+        except Exception:
+            pass
+
+    return devices
 
 class Device(object):
     """Class to interact with Busy-Tag devices through a serial connection.

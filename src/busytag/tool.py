@@ -3,11 +3,10 @@
 from os.path import basename, expanduser
 from typing import List, Optional
 
-import serial.tools.list_ports
-from absl import app, flags, logging
+from absl import app, flags
 
 from .config import ToolConfig
-from .device import Device
+from .device import Device, list_devices
 from .types import *
 
 FLAGS = flags.FLAGS
@@ -22,31 +21,6 @@ def format_size(size: int) -> str:
     if size < 500_000:
         return f'{size / 1_000:.2f} kB'
     return f'{size / 1_000_000:.2f} MB'
-
-
-def list_devices(baudrate: int) -> List[str]:
-    devices = []
-    ports = serial.tools.list_ports.comports()
-    logging.debug(f'Probing {len(ports)} serial devices...')
-
-    for port in ports:
-        try:
-            logging.debug(f'Trying to connect to {port.device}')
-            with serial.Serial(port.device, baudrate=baudrate, timeout=1.0) as conn:
-                logging.debug(f'Connected to {port.device}')
-                conn.write(b'AT+GDN\r\n')
-                while True:
-                    response = conn.readline()
-                    logging.debug(f'Read from device: {response}')
-                    if response.startswith(b'+evn'):
-                        continue
-                    if response.startswith(b'+DN:busytag-'):
-                        devices.append(port.device)
-                    break
-        except Exception:
-            pass
-
-    return devices
 
 
 def main(argv: List[str]) -> Optional[int]:
