@@ -1,14 +1,25 @@
 # SPDX-License-Identifier: MIT
 
+from typing import Sequence, Optional, List, Iterator
+
+import serial
 from absl import logging
-from typing import Sequence, Optional, List
+from serial.tools.list_ports import comports
 
 from .types import *
 
-import serial
-from serial.tools.list_ports import comports
-
 __all__ = ['Device', 'list_devices']
+
+
+def generate_chunks(n: int) -> Iterator[int]:
+    chunk_size = 1_000
+    bytes_chunked = 0
+    while bytes_chunked + chunk_size < n:
+        yield chunk_size
+        bytes_chunked += chunk_size
+
+    if n % chunk_size != 0:
+        yield n % chunk_size
 
 
 def list_devices(baudrate: int) -> List[str]:
@@ -28,7 +39,8 @@ def list_devices(baudrate: int) -> List[str]:
 
         try:
             logging.debug(f'Trying to connect to {port.device}')
-            with serial.Serial(port.device, baudrate=baudrate, timeout=1.0) as conn:
+            with serial.Serial(port.device, baudrate=baudrate,
+                               timeout=1.0) as conn:
                 logging.debug(f'Connected to {port.device}')
                 conn.write(b'AT+GDN\r\n')
                 while True:
@@ -43,6 +55,7 @@ def list_devices(baudrate: int) -> List[str]:
             pass
 
     return devices
+
 
 class Device(object):
     """Class to interact with Busy-Tag devices through a serial connection.
@@ -107,10 +120,12 @@ class Device(object):
 
         return result
 
-    def read_file(self, filename: str) -> bytes:
+    def read_file(self, filename: str, progress_listener: Optional[
+        ProgressListener] = None) -> bytes:
         """Reads a file from the device.
 
         :param filename: The filename of the file to read
+        :param progress_listener:
         :return: a `bytes` object with the file contents
         """
         logging.info(f'Reading file {filename}')
@@ -124,23 +139,51 @@ class Device(object):
 
         read_size = int(response.split(b',')[1]) + 8
         logging.debug(f'Reading {read_size} bytes from device')
-        response = self.conn.read(read_size)
+        if progress_listener is not None:
+            progress_listener.set_max(read_size)
+        response = b''
+        for chunk_size in generate_chunks(read_size):
+            response += self.conn.read(chunk_size)
+            if progress_listener is not None:
+                progress_listener.goto(len(response))
+
+        if progress_listener is not None:
+            progress_listener.finish()
+
         assert response[-6:] == b'\r\nOK\r\n'
         return response[2:-6]
 
-    def upload_file(self, filename: str, data: bytes):
+    def upload_file(self, filename: str, data: bytes,
+                    progress_listener: Optional[
+                        ProgressListener] = None):
         """Uploads a file to the device.
 
         :param filename: The filename of the file to upload
         :param data: The contents of the file to upload
+        :param progress_listener:
         """
         logging.info(f'Uploading file {filename} ({len(data)} bytes)')
 
         self.__send_command('AT+UF=%s,%d' % (filename, len(data)))
         self.__readline()
         logging.debug('Writing %d bytes to device', len(data))
-        self.conn.write(data)
+        bytes_written = 0
+
+        if progress_listener is not None:
+            progress_listener.set_max(len(data))
+
+        for chunk_size in generate_chunks(len(data)):
+            self.conn.write(data[bytes_written:bytes_written + chunk_size])
+            bytes_written += chunk_size
+            if progress_listener is not None:
+                progress_listener.goto(bytes_written)
+
+        logging.debug('Waiting for device to finish')
         terminator = self.conn.read(6)
+
+        if progress_listener is not None:
+            progress_listener.finish()
+
         assert terminator == b'\r\nOK\r\n'
 
     def delete_file(self, filename: str):
