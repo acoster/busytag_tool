@@ -3,17 +3,32 @@
 from os.path import basename, expanduser
 from typing import List, Optional
 
-import serial.tools.list_ports
-from absl import app, flags, logging
+from absl import app, flags
+from progress.bar import Bar
 
 from .config import ToolConfig
-from .device import Device
+from .device import Device, list_devices
 from .types import *
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('config_file', '~/.busytag.toml', 'Config file path')
 flags.DEFINE_string('device', None, 'Busy Tag\'s serial port.')
 flags.DEFINE_integer('baudrate', 115200, 'Connection baudrate.')
+
+class ProgressBar(Bar, ProgressListener):
+    suffix = '%(position_bytes)s / %(total_bytes)s - %(eta)ds'
+
+    @property
+    def position_bytes(self) -> str:
+        return format_size(self.index)
+
+    @property
+    def total_bytes(self) -> str:
+        return format_size(self.max)
+
+    def set_max(self, max: int) -> None:
+        self.max = max
+        self.start()
 
 
 def format_size(size: int) -> str:
@@ -24,37 +39,11 @@ def format_size(size: int) -> str:
     return f'{size / 1_000_000:.2f} MB'
 
 
-def list_devices(baudrate: int) -> List[str]:
-    devices = []
-    ports = serial.tools.list_ports.comports()
-    logging.debug(f'Probing {len(ports)} serial devices...')
-
-    for port in ports:
-        try:
-            logging.debug(f'Trying to connect to {port.device}')
-            with serial.Serial(port.device, baudrate=baudrate, timeout=1.0) as conn:
-                logging.debug(f'Connected to {port.device}')
-                conn.write(b'AT+GDN\r\n')
-                while True:
-                    response = conn.readline()
-                    logging.debug(f'Read from device: {response}')
-                    if response.startswith(b'+evn'):
-                        continue
-                    if response.startswith(b'+DN:busytag-'):
-                        devices.append(port.device)
-                    break
-        except Exception:
-            pass
-
-    return devices
-
-
 def main(argv: List[str]) -> Optional[int]:
     config = ToolConfig(FLAGS.config_file)
     if FLAGS.device is not None:
         config.device = FLAGS.device
     config.write_to_file()
-
     bt: Optional[Device] = None
 
     # Remove argv[0]
@@ -66,8 +55,10 @@ def main(argv: List[str]) -> Optional[int]:
         # Don't bother connecting for commands that don't need a device connection.
         if command not in ('list_devices', 'help'):
             if config.device is None:
-                print('A device must be specified using the `--device` flag or be set in the config file!')
-                print(f'You can run `{exec_name} list_devices` to find the available devices.')
+                print(
+                    'A device must be specified using the `--device` flag or be set in the config file!')
+                print(
+                    f'You can run `{exec_name} list_devices` to find the available devices.')
                 return 1
             bt = Device(config.device, baudrate=FLAGS.baudrate)
 
@@ -98,7 +89,8 @@ def main(argv: List[str]) -> Optional[int]:
         case 'list_files':
             print('Files in device: ')
             for file in bt.list_files():
-                print(f'  {file.name} ({file.type.value} - {format_size(file.size)})')
+                print(
+                    f'  {file.name} ({file.type.value} - {format_size(file.size)})')
             print(f'Available space: {format_size(bt.get_free_storage())}')
 
         case 'set_picture':
@@ -112,12 +104,13 @@ def main(argv: List[str]) -> Optional[int]:
             assert len(argv) >= 1
             filename = expanduser(argv.pop(0))
             with open(filename, 'rb') as fp:
-                bt.upload_file(basename(filename), fp.read())
+                bt.upload_file(basename(filename), fp.read(),
+                               ProgressBar(f'Uploading {basename(filename)}'))
 
         case 'get':
             assert len(argv) >= 1
             filename = argv.pop(0)
-            data = bt.read_file(filename)
+            data = bt.read_file(filename, ProgressBar(f'Downloading {filename}'))
             with open(filename, 'wb') as fp:
                 fp.write(data)
 
@@ -158,19 +151,26 @@ def main(argv: List[str]) -> Optional[int]:
             print('  list_pictures: Lists pictures in device')
             print('  list_files: Lists files in device')
             print('  get_picture: Gets the filename of the picture being shown')
-            print('  set_picture <filename>: Sets the picture shown in the device')
+            print(
+                '  set_picture <filename>: Sets the picture shown in the device')
             print('  put <filename>: Uploads <filename>')
-            print('  get <filename>: Copies <filename> from the device to the working directory')
+            print(
+                '  get <filename>: Copies <filename> from the device to the working directory')
             print('  rm <filename>: Deletes <filename>')
-            print('  set_led_solid_color <6 hex RGB colour>: Sets the LEDs colour')
-            print('  apply_led_preset <preset name>: Sets the LEDs colour according to a preset')
+            print(
+                '  set_led_solid_color <6 hex RGB colour>: Sets the LEDs colour')
+            print(
+                '  apply_led_preset <preset name>: Sets the LEDs colour according to a preset')
             print('  get_brightness: Gets current display brightness')
-            print('  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive')
+            print(
+                '  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive')
             print(f'\nFor flag documentation, run {exec_name} --help')
 
         case _:
-            print(f'Unknown command `{command}`. Please use the `help` to list available commands')
+            print(
+                f'Unknown command `{command}`. Please use the `help` to list available commands')
             return 1
+
     return 0
 
 

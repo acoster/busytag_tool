@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
 
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, IntFlag, verify, NAMED_FLAGS
 
 rgb_re = re.compile(r'^[0-9A-F]{6}$')
 
 __all__ = ['LedPin', 'FileEntry', 'FileEntryType', 'WifiConfig', 'LedConfig',
-           'LedPatternEntry' ]
+           'LedPatternEntry', 'ProgressListener']
 
 
 @verify(NAMED_FLAGS)
@@ -65,3 +66,27 @@ class LedPatternEntry:
 
     def __str__(self) -> str:
         return f'{int(self.pins)},{self.color},{self.speed},{self.delay}'
+
+
+class ProgressListener(ABC):
+    """Interface passed to operations that (might) take a long time,
+    which receives updates on the operation progress."""
+
+    @abstractmethod
+    def set_max(self, max: int) -> None:
+        """Sets the size of the operation (e.g. number of bytes in a file operation).
+
+        :param max: The max possible progress value."""
+        pass
+
+    @abstractmethod
+    def goto(self, position: int):
+        """Updates how far along the operation is.
+
+        :param position: The current position of the operation."""
+        pass
+
+    @abstractmethod
+    def finish(self):
+        """Called when the operation has finished."""
+        pass

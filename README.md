@@ -8,7 +8,8 @@ the [USB CDC interface]( https://luxafor.helpscoutdocs.com/article/47-busy-tag-u
 ## Installation
 
 ```shell
-$ pip install busytag
+$ pip install busytag  # to install just the library
+$ pip install busytag[cli]  # To install the library and the CLI tool
 ```
 
 ## CLI usage

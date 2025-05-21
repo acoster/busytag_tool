@@ -1,6 +1,6 @@
 [project]
 name = "busytag"
-version = "0.1.1"
+version = "0.1.2"
 dynamic = ["dependencies"]
 authors = [{ name = "Alex Coster", email = "alex@coster.ch" }]
 description = "A library and CLI tool to control Busy Tag devices."
@@ -26,3 +26,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.metadata.hooks.requirements_txt]
 files = ["requirements.txt"]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
