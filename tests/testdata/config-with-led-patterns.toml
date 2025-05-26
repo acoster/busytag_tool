@@ -1,0 +1,11 @@
+[[led_presets.green]]
+pins = 127
+color = '00FF00'
+
+[[led_presets.rb]]
+pins = 85
+color = 'FF0000'
+
+[[led_presets.rb]]
+pins = 42
+color = '0000FF'
