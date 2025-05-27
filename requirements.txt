@@ -1,5 +1,5 @@
 -i https://pypi.org/simple
-absl-py~=2.2.2
+absl-py~=2.3.0
 pyserial~=3.5
 tomlkit~=0.13.2
 progress~=1.6
