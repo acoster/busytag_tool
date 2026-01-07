@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: MIT
-from os.path import basename, expanduser
+from os.path import basename, expanduser, exists
 from typing import List, Optional
 
 from absl import app, flags
@@ -8,7 +8,7 @@ from progress.bar import Bar
 
 from .config import ToolConfig
 from .device import Device, list_devices
-from .types import *
+from .busytag_types import *
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('config_file', '~/.busytag.toml', 'Config file path')
@@ -54,13 +54,17 @@ def main(argv: List[str]) -> Optional[int]:
 
         # Don't bother connecting for commands that don't need a device connection.
         if command not in ('list_devices', 'help'):
-            if config.device is None:
-                print(
-                    'A device must be specified using the `--device` flag or be set in the config file!')
-                print(
-                    f'You can run `{exec_name} list_devices` to find the available devices.')
-                return 1
-            bt = Device(config.device, baudrate=FLAGS.baudrate)
+            if config.device is None or not exists(config.device):
+                available_devices = list_devices(FLAGS.baudrate)
+                if len(available_devices) > 1:
+                    print('More than one device found. Please rerun the tool with the `list_devices` command and specify a target with --device.')
+                    return 1
+                if len(available_devices) == 0:
+                    print('No busytag devices found.')
+                    return 1
+                bt = Device(available_devices[0], baudrate=FLAGS.baudrate)
+            else:
+                bt = Device(config.device, baudrate=FLAGS.baudrate)
 
     match command:
         case 'info':

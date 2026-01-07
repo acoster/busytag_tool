@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 import tomlkit
 
-from .types import *
+from .busytag_types import *
 
 
 class ToolConfig(object):

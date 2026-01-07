@@ -6,7 +6,7 @@ import serial
 from absl import logging
 from serial.tools.list_ports import comports
 
-from .types import *
+from .busytag_types import *
 
 __all__ = ['Device', 'list_devices']
 

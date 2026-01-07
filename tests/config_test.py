@@ -3,7 +3,7 @@ import os
 import pytest
 import tomlkit
 from busytag.config import ToolConfig
-from busytag.types import LedConfig, LedPin
+from busytag.busytag_types import LedConfig, LedPin
 
 
 @pytest.fixture
