@@ -1,9 +1,10 @@
 # busytag_tool
+
 [![PyPI version](https://img.shields.io/pypi/v/busytag)](https://pypi.org/project/busytag/)
 ![License](https://img.shields.io/pypi/l/busytag)
 
 Python library and CLI to interact with [Busy Tag](https://www.busy-tag.com/) devices using
-the [USB CDC interface]( https://luxafor.helpscoutdocs.com/article/47-busy-tag-usb-cdc-command-reference-guide).
+the [USB CDC interface](https://luxafor.helpscoutdocs.com/article/47-busy-tag-usb-cdc-command-reference-guide).
 
 ## Installation
 
@@ -13,9 +14,8 @@ $ pip install busytag
 
 ## CLI usage
 
-The first time the tool is used, you should pass the device path through the flag `--device=/dev/whatever`. This
-will be saved in `~/.busytag.toml` and will be used in later runs where `--device` is not passed. If you don't the port
-for your device, you can run `busytag-tool list_devices` to find it.
+If you have multiple devices connected to your machine, you should specify the port with the
+`--device` flag. If only one device is connected, the tool will automatically use it.
 
 ```shell
 $ busytag-tool
@@ -43,7 +43,7 @@ $ busytag-tool set_picture coding.png
 
 ### Config
 
-A config file with the device port is created at `~/.busytag.toml`. You can also add "led preset" entries there,
+A config file is created at `~/.busytag.toml`. You can add "led preset" entries there,
 which can then be used with the `apply_led_preset` to change the device's LED colours. For example, here are two
 entries, one that applies the same colour to all LEDs, and another that alternates colours:
 
