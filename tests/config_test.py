@@ -47,3 +47,16 @@ def test_writes_config(tmp_path):
 
     c = tomlkit.loads(p.read_text())
     assert c['device'] == '/dev/tty.somedevice'
+
+
+def test_loads_lowercase_led_preset_color(tmp_path):
+    p = tmp_path / 'lowercase.toml'
+    p.write_text("[[led_presets.red]]\npins = 127\ncolor = 'ff0000'\n")
+    config = ToolConfig(str(p))
+    assert config.get_led_preset('red') == [LedConfig(LedPin.ALL, 'FF0000')]
+
+
+def test_missing_led_preset_raises_value_error(testdata_path):
+    config = ToolConfig(testdata_path('config-with-led-patterns'))
+    with pytest.raises(ValueError):
+        config.get_led_preset('does-not-exist')

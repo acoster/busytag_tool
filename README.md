@@ -36,7 +36,7 @@ Available commands:
   set_led_solid_color <6 hex RGB colour>: Sets the LEDs colour
   apply_led_preset <preset name>: Sets the LEDs colour according to a preset
   get_brightness: Gets current display brightness
-  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive
+  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive)
 
 $ busytag-tool set_picture coding.png
 ```

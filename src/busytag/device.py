@@ -12,14 +12,13 @@ __all__ = ['Device', 'list_devices']
 
 
 def generate_chunks(n: int) -> Iterator[int]:
+    """Splits `n` bytes into chunks of at most 1000 bytes, yielding each chunk's size."""
     chunk_size = 1_000
-    bytes_chunked = 0
-    while bytes_chunked + chunk_size < n:
-        yield chunk_size
-        bytes_chunked += chunk_size
-
-    if n % chunk_size != 0:
-        yield n % chunk_size
+    remaining = n
+    while remaining > 0:
+        current = min(chunk_size, remaining)
+        yield current
+        remaining -= current
 
 
 def list_devices(baudrate: int) -> List[str]:
@@ -67,7 +66,8 @@ class Device(object):
     def __init__(self, port_path: Optional[str] = None,
                  connection: Optional[serial.Serial] = None,
                  baudrate: int = 115200):
-        assert not (port_path is None and connection is None)
+        if port_path is None and connection is None:
+            raise ValueError('Either port_path or connection must be provided')
         if port_path is not None:
             self._port = port_path
             logging.info(f'Connecting to serial port {port_path}')
@@ -150,7 +150,8 @@ class Device(object):
         if progress_listener is not None:
             progress_listener.finish()
 
-        assert response[-6:] == b'\r\nOK\r\n'
+        if response[-6:] != b'\r\nOK\r\n':
+            raise IOError(f'Unexpected terminator when reading {filename}: {response[-6:]!r}')
         return response[2:-6]
 
     def upload_file(self, filename: str, data: bytes,
@@ -184,7 +185,8 @@ class Device(object):
         if progress_listener is not None:
             progress_listener.finish()
 
-        assert terminator == b'\r\nOK\r\n'
+        if terminator != b'\r\nOK\r\n':
+            raise IOError(f'Unexpected terminator when uploading {filename}: {terminator!r}')
 
     def delete_file(self, filename: str):
         """Deletes a file from the device.'
@@ -243,7 +245,8 @@ class Device(object):
         return result
 
     def set_led_pattern(self, pattern: Sequence[LedPatternEntry]):
-        assert 0 < len(pattern) <= 40
+        if not 0 < len(pattern) <= 40:
+            raise ValueError('LED pattern must have between 1 and 40 entries')
         self.__send_command(f'AT+CP={len(pattern)}')
         self.__read_response('>')
         for entry in pattern:
@@ -265,6 +268,11 @@ class Device(object):
         logging.info('Resetting wifi configuration')
         self.__send_command('AT+FRWCF')
         self.__read_response('OK')
+
+    @property
+    def port(self) -> Optional[str]:
+        """Serial port path, or None if the device was created from an existing connection."""
+        return self._port
 
     @property
     def capacity(self) -> int:
