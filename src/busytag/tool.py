@@ -39,7 +39,26 @@ def format_size(size: int) -> str:
     return f'{size / 1_000_000:.2f} MB'
 
 
+class UsageError(Exception):
+    """Raised when a command is invoked with missing or invalid arguments."""
+
+
+def pop_arg(argv: List[str], command: str, arg_name: str) -> str:
+    """Pops the next positional argument, or raises UsageError if there is none."""
+    if len(argv) == 0:
+        raise UsageError(f'Command `{command}` requires argument <{arg_name}>')
+    return argv.pop(0)
+
+
 def main(argv: List[str]) -> Optional[int]:
+    try:
+        return run_command(argv)
+    except UsageError as e:
+        print(f'Error: {e}')
+        return 1
+
+
+def run_command(argv: List[str]) -> Optional[int]:
     config = ToolConfig(FLAGS.config_file)
     if FLAGS.device is not None:
         config.device = FLAGS.device
@@ -71,7 +90,7 @@ def main(argv: List[str]) -> Optional[int]:
             print(f'Device name:      {bt.name}')
             print(f'Device ID:        {bt.device_id}')
             print(f'Firmware version: {bt.firmware_version}')
-            print(f'Serial port:      {config.device}')
+            print(f'Serial port:      {bt.port}')
             print(f'Storage capacity: {format_size(bt.capacity)}')
             print(f'Free storage:     {format_size(bt.get_free_storage())}')
 
@@ -98,52 +117,58 @@ def main(argv: List[str]) -> Optional[int]:
             print(f'Available space: {format_size(bt.get_free_storage())}')
 
         case 'set_picture':
-            assert len(argv) >= 1
-            bt.set_active_picture(argv.pop(0))
+            bt.set_active_picture(pop_arg(argv, command, 'filename'))
 
         case 'get_picture':
             print(f'Current active picture: {bt.get_active_picture()}')
 
         case 'put':
-            assert len(argv) >= 1
-            filename = expanduser(argv.pop(0))
+            filename = expanduser(pop_arg(argv, command, 'filename'))
             with open(filename, 'rb') as fp:
                 bt.upload_file(basename(filename), fp.read(),
                                ProgressBar(f'Uploading {basename(filename)}'))
 
         case 'get':
-            assert len(argv) >= 1
-            filename = argv.pop(0)
+            filename = pop_arg(argv, command, 'filename')
             data = bt.read_file(filename, ProgressBar(f'Downloading {filename}'))
             with open(filename, 'wb') as fp:
                 fp.write(data)
 
         case 'rm':
-            assert len(argv) >= 1
-            filename = argv.pop(0)
+            filename = pop_arg(argv, command, 'filename')
             bt.delete_file(filename)
 
         case 'set_led_solid_color':
-            assert len(argv) >= 1
-            led_config = LedConfig(LedPin.ALL, argv.pop(0).upper())
+            color = pop_arg(argv, command, 'colour')
+            try:
+                led_config = LedConfig(LedPin.ALL, color)
+            except ValueError as e:
+                raise UsageError(str(e))
             bt.set_led_solid_color(led_config)
 
         case 'apply_led_preset':
-            assert len(argv) >= 1
-            preset_name = argv.pop(0)
+            preset_name = pop_arg(argv, command, 'preset name')
+            try:
+                preset = config.get_led_preset(preset_name)
+            except ValueError as e:
+                raise UsageError(str(e))
 
             # Clear all LEDs first
             bt.set_led_solid_color(LedConfig(LedPin.ALL, '000000'))
-            for e in config.led_presets.get(preset_name):
+            for e in preset:
                 bt.set_led_solid_color(e)
 
         case 'get_brightness':
             print(f'Brightness: {bt.get_display_brightness()}')
 
         case 'set_brightness':
-            assert len(argv) >= 1
-            brightness = int(argv.pop(0))
-            assert 0 < brightness <= 100
+            value = pop_arg(argv, command, 'brightness')
+            try:
+                brightness = int(value)
+            except ValueError:
+                raise UsageError(f'Brightness must be an integer, got {value!r}')
+            if not 0 < brightness <= 100:
+                raise UsageError('Brightness must be between 1 and 100')
             bt.set_display_brightness(brightness)
 
         case 'help':
@@ -167,7 +192,7 @@ def main(argv: List[str]) -> Optional[int]:
                 '  apply_led_preset <preset name>: Sets the LEDs colour according to a preset')
             print('  get_brightness: Gets current display brightness')
             print(
-                '  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive')
+                '  set_brightness <brightness>: Sets current display brightness (int between 1 and 100, inclusive)')
             print(f'\nFor flag documentation, run {exec_name} --help')
 
         case _:

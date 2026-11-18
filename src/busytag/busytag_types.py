@@ -7,6 +7,13 @@ from enum import Enum, IntFlag, verify, NAMED_FLAGS
 
 rgb_re = re.compile(r'^[0-9A-F]{6}$')
 
+
+def _normalize_color(obj, color: str) -> None:
+    """Validates an RGB hex colour, storing it upper-cased on the (frozen) dataclass."""
+    if not isinstance(color, str) or not rgb_re.match(color.upper()):
+        raise ValueError(f'Invalid colour {color!r}: expected 6 hex digits (e.g. FF0000)')
+    object.__setattr__(obj, 'color', color.upper())
+
 __all__ = ['LedPin', 'FileEntry', 'FileEntryType', 'WifiConfig', 'LedConfig',
            'LedPatternEntry', 'ProgressListener']
 
@@ -49,7 +56,7 @@ class LedConfig:
     color: str
 
     def __post_init__(self):
-        assert rgb_re.match(self.color)
+        _normalize_color(self, self.color)
 
 
 @dataclass(frozen=True)
@@ -60,9 +67,11 @@ class LedPatternEntry:
     delay: int
 
     def __post_init__(self):
-        assert rgb_re.match(self.color)
-        assert self.speed >= 0
-        assert self.delay >= 0
+        _normalize_color(self, self.color)
+        if self.speed < 0:
+            raise ValueError('speed must be non-negative')
+        if self.delay < 0:
+            raise ValueError('delay must be non-negative')
 
     def __str__(self) -> str:
         return f'{int(self.pins)},{self.color},{self.speed},{self.delay}'

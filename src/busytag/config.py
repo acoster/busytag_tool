@@ -19,7 +19,8 @@ class ToolConfig(object):
                 self.__load_from_file()
 
     def write_to_file(self):
-        assert self.path is not None
+        if self.path is None:
+            raise ValueError('Cannot write config: no path set')
         conf = {}
 
         if self.device is not None:
