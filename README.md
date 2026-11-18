@@ -74,3 +74,12 @@ bt = Device('/dev/fooBar')
 bt.set_active_picture('coding.gif')
 bt.set_led_solid_color(LedConfig(LedPin.ALL, 'FF0000'))
 ```
+
+## Releasing
+
+1. Bump `version` in `pyproject.toml` and merge it into `main`.
+2. Create a GitHub release whose tag matches that version (e.g. `v0.1.7`).
+
+Publishing the release triggers the `Publish to PyPI` workflow, which checks the tag against the package version, runs
+the tests, builds the package and uploads it to PyPI using
+[trusted publishing](https://docs.pypi.org/trusted-publishers/).
