@@ -50,8 +50,8 @@ def list_devices(baudrate: int) -> List[str]:
                     if response.startswith(b'+DN:busytag-'):
                         devices.append(port.device)
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f'Could not query {port.device}: {e}')
 
     return devices
 
@@ -76,13 +76,31 @@ class Device(object):
             self._port = None
             self.conn = connection
 
-        self.__capacity = int(self.__get_readonly_attribute('TSS'))
-        self.__device_id = self.__get_readonly_attribute('ID')
-        self.__firmware_version = self.__get_readonly_attribute('FV')
-        self.__hostname = self.__get_readonly_attribute('LHA').removeprefix(
-            'http://')
-        self.__manufacturer = self.__get_readonly_attribute('MN')
-        self.__name = self.__get_readonly_attribute('DN')
+        try:
+            self.__capacity = int(self.__get_readonly_attribute('TSS'))
+            self.__device_id = self.__get_readonly_attribute('ID')
+            self.__firmware_version = self.__get_readonly_attribute('FV')
+            self.__hostname = self.__get_readonly_attribute(
+                'LHA').removeprefix('http://')
+            self.__manufacturer = self.__get_readonly_attribute('MN')
+            self.__name = self.__get_readonly_attribute('DN')
+        except Exception:
+            # Don't leak a port we opened ourselves if the handshake fails.
+            if port_path is not None:
+                self.conn.close()
+            raise
+
+    def close(self):
+        """Closes the serial connection to the device."""
+        if self.conn is not None and self.conn.is_open:
+            logging.info('Closing connection')
+            self.conn.close()
+
+    def __enter__(self) -> 'Device':
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def list_pictures(self) -> Sequence[FileEntry]:
         """Lists pictures that can be displayed on the screen."""
