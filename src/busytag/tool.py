@@ -63,7 +63,6 @@ def run_command(argv: List[str]) -> Optional[int]:
     if FLAGS.device is not None:
         config.device = FLAGS.device
     config.write_to_file()
-    bt: Optional[Device] = None
 
     # Remove argv[0]
     exec_name = argv.pop(0)
@@ -71,20 +70,28 @@ def run_command(argv: List[str]) -> Optional[int]:
     if len(argv) > 0:
         command = argv.pop(0)
 
-        # Don't bother connecting for commands that don't need a device connection.
-        if command not in ('list_devices', 'help'):
-            if config.device is None or not exists(config.device):
-                available_devices = list_devices(FLAGS.baudrate)
-                if len(available_devices) > 1:
-                    print('More than one device found. Please rerun the tool with the `list_devices` command and specify a target with --device.')
-                    return 1
-                if len(available_devices) == 0:
-                    print('No busytag devices found.')
-                    return 1
-                bt = Device(available_devices[0], baudrate=FLAGS.baudrate)
-            else:
-                bt = Device(config.device, baudrate=FLAGS.baudrate)
+    # Don't bother connecting for commands that don't need a device connection.
+    if command in ('list_devices', 'help'):
+        return execute_command(command, argv, exec_name, config, None)
 
+    if config.device is None or not exists(config.device):
+        available_devices = list_devices(FLAGS.baudrate)
+        if len(available_devices) > 1:
+            print('More than one device found. Please rerun the tool with the `list_devices` command and specify a target with --device.')
+            return 1
+        if len(available_devices) == 0:
+            print('No busytag devices found.')
+            return 1
+        port = available_devices[0]
+    else:
+        port = config.device
+
+    with Device(port, baudrate=FLAGS.baudrate) as bt:
+        return execute_command(command, argv, exec_name, config, bt)
+
+
+def execute_command(command: str, argv: List[str], exec_name: str,
+                    config: ToolConfig, bt: Optional[Device]) -> int:
     match command:
         case 'info':
             print(f'Device name:      {bt.name}')

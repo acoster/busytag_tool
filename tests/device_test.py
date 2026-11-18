@@ -1,5 +1,7 @@
 import pytest
+from absl import logging
 
+from busytag import device as device_module
 from busytag.busytag_types import LedConfig, LedPatternEntry, LedPin
 from busytag.device import Device, generate_chunks
 
@@ -20,6 +22,10 @@ class FakeSerial:
         self.files = dict(files or {})
         self.buffer = b''
         self.pending_upload = None  # (filename, size, received bytes)
+        self.is_open = True
+
+    def close(self):
+        self.is_open = False
 
     def _queue(self, data: bytes):
         self.buffer += data
@@ -106,3 +112,59 @@ def test_led_pattern_entry_validation():
     assert str(LedPatternEntry(LedPin.PIN_0, 'abcdef', 1, 2)) == '1,ABCDEF,1,2'
     with pytest.raises(ValueError):
         LedPatternEntry(LedPin.PIN_0, 'ABCDEF', -1, 0)
+
+
+def test_close_closes_connection():
+    conn = FakeSerial()
+    bt = Device(connection=conn)
+    bt.close()
+    assert not conn.is_open
+    bt.close()  # Closing twice is harmless.
+
+
+def test_context_manager_closes_connection():
+    conn = FakeSerial()
+    with Device(connection=conn) as bt:
+        assert bt.device_id == 'ABC123'
+        assert conn.is_open
+    assert not conn.is_open
+
+
+def test_init_closes_port_it_opened_on_failure(monkeypatch):
+    class BrokenSerial(FakeSerial):
+        def write(self, data):
+            raise OSError('device went away')
+
+    opened = []
+
+    def fake_serial(port, baudrate):
+        conn = BrokenSerial()
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(device_module.serial, 'Serial', fake_serial)
+    with pytest.raises(OSError):
+        Device('/dev/fake')
+    assert not opened[0].is_open
+
+
+class FakePort:
+    def __init__(self, device, product='BUSY TAG'):
+        self.device = device
+        self.product = product
+
+
+def test_list_devices_logs_errors(monkeypatch):
+    monkeypatch.setattr(device_module, 'comports',
+                        lambda: [FakePort('/dev/locked'), FakePort('/dev/other', 'Other')])
+
+    def failing_serial(*args, **kwargs):
+        raise PermissionError('Permission denied')
+
+    warnings = []
+    monkeypatch.setattr(device_module.serial, 'Serial', failing_serial)
+    monkeypatch.setattr(logging, 'warning', lambda msg, *a: warnings.append(msg % a if a else msg))
+
+    assert device_module.list_devices(115200) == []
+    assert len(warnings) == 1
+    assert '/dev/locked' in warnings[0] and 'Permission denied' in warnings[0]
