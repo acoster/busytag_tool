@@ -1,4 +1,4 @@
-absl-py~=2.3.0
+absl-py~=2.5.1
 pyserial~=3.5
 tomlkit~=0.13.2
 progress~=1.6
